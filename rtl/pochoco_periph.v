@@ -30,6 +30,44 @@ module pochoco_periph (
   reg [3:0]  led_q;
   reg [7:0]  digit_q;
 
+
+  // Aceleracion 1: comparador para estrategia de trading
+  reg [13:0] trade_sum_q;
+  reg [1:0]  trade_result_q;
+
+  // Precio de 8 bits y suma movil de 64 precios.
+  // Las concatenaciones son conexiones fijas de hardware.
+  wire [8:0] price_plus_gap;
+  wire [14:0] buy_threshold;
+  wire [14:0] sell_threshold;
+
+  assign price_plus_gap = {1'b0, wdata_i[7:0]} + 9'd4;
+
+  assign buy_threshold  = {price_plus_gap, 6'b0};
+  assign sell_threshold = {1'b0, wdata_i[7:0], 6'b0};
+
+  always @(posedge clk_i or negedge rst_ni) begin
+    if (!rst_ni) begin
+      trade_sum_q    <= 14'd0;
+      trade_result_q <= 2'b00;
+    end else if (access && we_i) begin
+      case (off)
+        6'd4: trade_sum_q <= wdata_i[13:0];
+
+        6'd5: begin
+          trade_result_q[0] <=
+              {1'b0, trade_sum_q} >= buy_threshold;
+
+          trade_result_q[1] <=
+              sell_threshold >= {1'b0, trade_sum_q};
+        end
+
+        default: ;
+      endcase
+    end
+  end
+
+
   //agregado mio
   reg [31:0] cycle_counter_q;
   always @(posedge clk_i or negedge rst_ni) begin
@@ -89,9 +127,11 @@ end
   always @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) rdata_o <= 32'b0;
     else if (access & ~we_i) begin
+      
       case (off)
-        6'd2: rdata_o <= {28'b0, btn_i}; // Buttons
-        6'd3: rdata_o <= cycle_counter_q; // agregado mio
+        6'd2: rdata_o <= {28'b0, btn_i};
+        6'd3: rdata_o <= cycle_counter_q;
+        6'd6: rdata_o <= {30'b0, trade_result_q};
         default: rdata_o <= 32'b0;
       endcase
     end

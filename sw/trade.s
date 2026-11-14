@@ -106,56 +106,55 @@ advance_ptr:
     # Reiniciar puntero circular
     addi x7, x0, 1024
 
+
 evaluate:
-    # Guardar suma para depuracion
+    # Guardar suma movil para depuracion
     addi x6, x0, 1536
     sw x8, 0(x6)
 
-    # Sin 64 precios: mantener
+    # Esperar hasta tener 64 precios
     bne x9, x13, mantener
+
+    # Base de perifericos generales
+    lui x6, 0x80000
+
+    # Enviar suma movil al acelerador
+    sw x8, 16(x6)
+
+    # Enviar precio y calcular comparaciones
+    sw x5, 20(x6)
+
+    # Leer resultado del acelerador
+    lw x14, 24(x6)
 
     # Si tenemos posicion, evaluar venta
     addi x4, x0, 2
     beq x15, x4, evaluate_sell
 
-    # Si ya operamos, mantener
+    # Si no estamos libres para comprar, mantener
     bne x15, x0, mantener
 
-    # Evaluar compra
-    addi x14, x5, 4
+    # Bit 0: condicion de compra
+    andi x14, x14, 1
+    bne x14, x0, comprar
 
-    # Multiplicar por 64
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-
-    bge x8, x14, comprar
     jal x0, mantener
 
 evaluate_sell:
-    # Actualizar maximo observado
+    # Actualizar precio maximo
     bge x12, x5, check_mean
     add x12, x5, x0
 
 check_mean:
-    # Calcular 64 * precio
-    add x14, x5, x5
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
+    # Bit 1: condicion de venta por media movil
+    andi x14, x14, 2
+    bne x14, x0, vender
 
-    # Vender si precio >= media
-    bge x14, x8, vender
-
-    # Retroceso desde el maximo
+    # Segunda condicion: retroceso de 15
     sub x14, x12, x5
     addi x4, x0, 15
     bge x14, x4, vender
+
 
 mantener:
     sw x0, 8(x2)
