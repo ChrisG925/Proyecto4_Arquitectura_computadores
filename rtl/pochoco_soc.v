@@ -76,6 +76,8 @@ assign rst_ni = (por_cnt == 16'hFFFF);
   assign spi_req   = data_req &  spi_sel;
 
   wire [31:0] ram_b_rdata, per_rdata, spi_rdata;
+  // Aceleracion 2: suma movil desde la RAM
+  wire [13:0] window_sum;
 
   reg rd_is_per, rd_is_spi;
   always @(posedge clk or negedge rst_ni) begin
@@ -99,27 +101,34 @@ assign rst_ni = (por_cnt == 16'hFFFF);
     .b_we_i    (data_we),
     .b_be_i    (data_be),
     .b_addr_i  (data_addr),
-    .b_wdata_i (data_wdata),
-    .b_rdata_o (ram_b_rdata)
+    .b_wdata_i   (data_wdata),
+    .b_rdata_o   (ram_b_rdata),
+    .window_sum_o (window_sum)
   );
 
   // Peripherals
   wire [6:0] seg1, seg2;
 
+ 
   pochoco_periph u_periph (
-    .clk_i     (clk),
-    .rst_ni    (rst_ni),
-    .sel_i     (per_sel),
-    .req_i     (per_req),
-    .we_i      (data_we),
-    .addr_i    (data_addr[7:0]),
-    .wdata_i   (data_wdata),
-    .rdata_o   (per_rdata),
-    .leds_o    (o_LED),
-    .btn_i     (i_Switch),
-    .seg1_o    (seg1),
-    .seg2_o    (seg2)
+    .clk_i        (clk),
+    .rst_ni       (rst_ni),
+    .sel_i        (per_sel),
+    .req_i        (per_req),
+    .we_i         (data_we),
+    .addr_i       (data_addr[7:0]),
+    .wdata_i      (data_wdata),
+
+    // Aceleracion 2: suma movil desde RAM
+    .window_sum_i (window_sum),
+
+    .rdata_o      (per_rdata),
+    .leds_o       (o_LED),
+    .btn_i        (i_Switch),
+    .seg1_o       (seg1),
+    .seg2_o       (seg2)
   );
+
 
   // SPI Slave
   pochoco_spi_slave u_spi (

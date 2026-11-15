@@ -132,7 +132,15 @@ module tb_proyecto_4;
     $display("Suma movil calculada por Espino: %0d",
              dut.u_ram.mem[384]);
 
-   
+   // Suma movil calculada por el programa Assembly
+    $display("Suma movil calculada por Espino: %0d",
+         dut.u_ram.mem[384]);
+
+// Suma movil calculada por el acelerador de hardware
+    $display("Suma movil hardware: %0d",
+         dut.u_ram.window_sum_q);
+
+
 
 
 

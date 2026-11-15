@@ -3,178 +3,230 @@
 .global _start
 
 _start:
-    # Base SPI
-    lui x2, 0x80010
+    # Direccion base del periferico SPI
+    lui x2,0x80010
 
-    # Buffer circular: 0x400 a 0x4FC
-    addi x7, x0, 1024
-    addi x10, x0, 1280
+    # Historial circular de 64 precios
+    addi x7,x0,1024
+    addi x10,x0,1280
 
-    # Suma y cantidad de precios
-    addi x8, x0, 0
-    addi x9, x0, 0
-    addi x13, x0, 64
+    # Suma movil
+    addi x8,x0,0
 
-    # Estado:
-    # 0 = sin posicion
-    # 1 = compra pendiente
-    # 2 = posicion abierta
-    # 3 = venta pendiente
-    # 4 = primera operacion terminada
-    addi x15, x0, 0
+    # Contador de precios recibidos
+    addi x9,x0,0
+    addi x13,x0,64
 
-    # Maximo de la posicion
-    addi x12, x0, 0
+    # Estado de trading
+    addi x15,x0,0
 
-    # Decision inicial: mantener
-    sw x0, 8(x2)
+    # Precio maximo desde la compra
+    addi x12,x0,0
+
+    # Decision inicial: HOLD
+    sw x0,8(x2)
+
+
+# ==========================================
+# ESPERAR NUEVO PRECIO POR SPI
+# ==========================================
 
 wait_price:
-    lw x3, 0(x2)
-    andi x4, x3, 1
-    beq x4, x0, wait_price
+    lw x3,0(x2)
+    andi x4,x3,1
+    beq x4,x0,wait_price
 
-    # Precio nuevo
-    lw x5, 4(x2)
+    # Leer precio recibido
+    lw x5,4(x2)
 
-    # Actualizar estado de orden pendiente
-    addi x4, x0, 1
-    bne x15, x4, check_sell_pending
+    # Comprobar compra pendiente
+    addi x4,x0,1
+    bne x15,x4,check_sell_pending
 
-    # Compra ejecutada en este tick
-    addi x15, x0, 2
-    add x12, x5, x0
-    jal x0, update_window
+    addi x15,x0,2
+    add x12,x5,x0
+    jal x0,update_window
 
+
+# ==========================================
+# ESTADOS DEL ALGORITMO
+# ==========================================
 
 check_sell_pending:
-    # Comprobar venta pendiente
-    addi x4, x0, 3
-    beq x15, x4, sell_executed
+    addi x4,x0,3
+    beq x15,x4,sell_executed
 
-    # Estados de espera despues de vender
-    addi x4, x0, 4
-    beq x15, x4, cooldown_1
+    addi x4,x0,4
+    beq x15,x4,cooldown_1
 
-    addi x4, x0, 5
-    beq x15, x4, cooldown_2
+    addi x4,x0,5
+    beq x15,x4,cooldown_2
 
-    addi x4, x0, 6
-    beq x15, x4, cooldown_done
+    addi x4,x0,6
+    beq x15,x4,cooldown_done
 
-    jal x0, update_window
+    jal x0,update_window
+
 
 sell_executed:
-    # La venta se ejecuta en el tick actual
-    addi x15, x0, 4
-    jal x0, update_window
+    addi x15,x0,4
+    jal x0,update_window
+
 
 cooldown_1:
-    addi x15, x0, 5
-    jal x0, update_window
+    addi x15,x0,5
+    jal x0,update_window
+
 
 cooldown_2:
-    addi x15, x0, 6
-    jal x0, update_window
+    addi x15,x0,6
+    jal x0,update_window
+
 
 cooldown_done:
-    # Se permite comprar nuevamente
-    addi x15, x0, 0
-    jal x0, update_window
+    addi x15,x0,0
+    jal x0,update_window
 
+
+# ==========================================
+# ACELERACION 2: ACTUALIZAR VENTANA
+# ==========================================
 
 update_window:
-    # Si ventana llena, quitar el antiguo
-    bge x9, x13, full_window
+    # Durante los primeros 64 precios
+    # guardar sin reemplazar valores anteriores
+    bge x9,x13,full_window
 
-    # Llenar ventana inicial
-    add x8, x8, x5
-    sw x5, 0(x7)
-    addi x9, x9, 1
-    jal x0, advance_ptr
+    sw x5,0(x7)
+    addi x9,x9,1
+    jal x0,advance_ptr
+
 
 full_window:
-    lw x11, 0(x7)
-    sub x8, x8, x11
-    add x8, x8, x5
-    sw x5, 0(x7)
+    # Leer el precio antiguo desde RAM
+    lw x11,0(x7)
+
+    # Escribir el nuevo precio
+    # El hardware actualiza la suma movil
+    sw x5,0(x7)
+
 
 advance_ptr:
-    addi x7, x7, 4
-    bne x7, x10, evaluate
+    # Avanzar el puntero circular
+    addi x7,x7,4
 
-    # Reiniciar puntero circular
-    addi x7, x0, 1024
+    bne x7,x10,evaluate
+
+    # Volver al inicio del historial
+    addi x7,x0,1024
+
+
+# ==========================================
+# LEER SUMA MOVIL DESDE HARDWARE
+# ==========================================
 
 evaluate:
+    # Base MMIO de perifericos
+    lui x6,0x80000
+
+    # Leer suma movil en 0x80000010
+    lw x8,16(x6)
+
     # Guardar suma para depuracion
-    addi x6, x0, 1536
-    sw x8, 0(x6)
+    addi x6,x0,1536
+    sw x8,0(x6)
 
-    # Sin 64 precios: mantener
-    bne x9, x13, mantener
+    # Esperar hasta llenar 64 precios
+    bne x9,x13,mantener
 
-    # Si tenemos posicion, evaluar venta
-    addi x4, x0, 2
-    beq x15, x4, evaluate_sell
+    # Comprobar si tenemos acciones
+    addi x4,x0,2
+    beq x15,x4,evaluate_sell
 
-    # Si ya operamos, mantener
-    bne x15, x0, mantener
+    # Si estamos en cooldown, mantener
+    bne x15,x0,mantener
 
-    # Evaluar compra
-    addi x14, x5, 4
+    # ======================================
+    # CONDICION DE COMPRA
+    # 64*(precio+4) <= suma_movil
+    # ======================================
 
-    # Multiplicar por 64
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
+    addi x14,x5,4
 
-    bge x8, x14, comprar
-    jal x0, mantener
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+
+    bge x8,x14,comprar
+    jal x0,mantener
+
+
+# ==========================================
+# CONDICIONES DE VENTA
+# ==========================================
 
 evaluate_sell:
-    # Actualizar maximo observado
-    bge x12, x5, check_mean
-    add x12, x5, x0
+    # Actualizar maximo desde la compra
+    bge x12,x5,check_mean
+    add x12,x5,x0
+
 
 check_mean:
-    # Calcular 64 * precio
-    add x14, x5, x5
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
-    add x14, x14, x14
+    # Condicion 1: precio >= media movil
+    add x14,x5,x5
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
+    add x14,x14,x14
 
-    # Vender si precio >= media
-    bge x14, x8, vender
+    bge x14,x8,vender
 
-    # Retroceso desde el maximo
-    sub x14, x12, x5
-    addi x4, x0, 15
-    bge x14, x4, vender
+    # Condicion 2: trailing stop de 15
+    sub x14,x12,x5
+    addi x4,x0,15
+    bge x14,x4,vender
+
+
+# ==========================================
+# MANTENER
+# ==========================================
 
 mantener:
-    sw x0, 8(x2)
-    jal x0, wait_price
+    sw x0,8(x2)
+    jal x0,wait_price
+
+
+# ==========================================
+# COMPRAR 16 ACCIONES
+# ==========================================
 
 comprar:
-    # Comprar 16 acciones
-    addi x6, x0, 80
-    sw x6, 8(x2)
+    # BUY = 01 en bits 7:6
+    # Cantidad = 16
+    # 0x40 + 0x10 = 0x50 = 80
+    addi x6,x0,80
+    sw x6,8(x2)
 
     # Compra pendiente
-    addi x15, x0, 1
-    jal x0, wait_price
+    addi x15,x0,1
+    jal x0,wait_price
+
+
+# ==========================================
+# VENDER 16 ACCIONES
+# ==========================================
 
 vender:
-    # Vender 16 acciones
-    addi x6, x0, 144
-    sw x6, 8(x2)
+    # SELL = 10 en bits 7:6
+    # Cantidad = 16
+    # 0x80 + 0x10 = 0x90 = 144
+    addi x6,x0,144
+    sw x6,8(x2)
 
     # Venta pendiente
-    addi x15, x0, 3
-    jal x0, wait_price
+    addi x15,x0,3
+    jal x0,wait_price
