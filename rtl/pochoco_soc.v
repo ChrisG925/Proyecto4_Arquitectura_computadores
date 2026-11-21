@@ -10,7 +10,7 @@
 
 module pochoco_soc #(
   parameter NumWords = 512,
-  parameter MemFile  = ""
+  parameter MemFile  = "sw/trade.hex"
 ) (
   input  wire       i_Clk,
 
@@ -32,14 +32,14 @@ module pochoco_soc #(
   assign clk = i_Clk;
 
   // Power-on reset
-  reg [15:0] por_cnt = 16'b0; // cambio
+  reg [11:0] por_cnt = 12'b0; // cambio
   wire       rst_ni;
   always @(posedge clk) begin
-  if (por_cnt != 16'hFFFF)
-    por_cnt <= por_cnt + 16'd1;
+  if (por_cnt != 12'hFFF)
+    por_cnt <= por_cnt + 12'd1;
 end
 
-assign rst_ni = (por_cnt == 16'hFFFF);
+assign rst_ni = (por_cnt == 12'hFFF);
 // fin del cambio
 
 

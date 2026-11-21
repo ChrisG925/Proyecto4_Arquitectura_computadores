@@ -41,7 +41,7 @@ module pochoco_periph (
   wire [14:0] buy_threshold;
   wire [14:0] sell_threshold;
 
-  assign price_plus_gap = {1'b0, wdata_i[7:0]} + 9'd4;
+  assign price_plus_gap = {1'b0, wdata_i[7:0]} + 9'd8;
 
   assign buy_threshold  = {price_plus_gap, 6'b0};
   assign sell_threshold = {1'b0, wdata_i[7:0], 6'b0};
