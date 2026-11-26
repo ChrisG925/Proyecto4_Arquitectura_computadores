@@ -1,6 +1,6 @@
 // Testbench Proyecto 4: emula a la FPGA maestra.
 // Correr desde la raíz del repositorio:
-//   python3 tools/pochoasm.py sw/trade.s -o sw/trade.hex
+//   python3 sw/assembler.py sw/trade.s sw/trade.hex
 //   iverilog -g2012 -s tb_proyecto_4 -o /tmp/tb_p4 $(yosys-config --datdir)/ice40/cells_sim.v rtl/*.v rtl/espino_core/*.v tb/tb_proyecto_4.sv
 //   vvp -n /tmp/tb_p4
 
@@ -25,7 +25,7 @@ module tb_proyecto_4;
   logic sclk = 0, mosi = 0, cs_n = 1;
   wire  miso;
 
-  pochoco_soc #(.MemFile(PROGRAMA)) dut (
+  pochoco_soc dut (
     .i_Clk(clk), .o_LED(), .i_Switch(4'b0000),
     .o_Segment1_A(), .o_Segment1_B(), .o_Segment1_C(), .o_Segment1_D(),
     .o_Segment1_E(), .o_Segment1_F(), .o_Segment1_G(),
@@ -42,7 +42,20 @@ module tb_proyecto_4;
     fd = $fopen(SERIE, "r");
     if (fd == 0) begin $display("ERROR: no se encontro %s", SERIE); $finish; end
     r = $fgets(encabezado, fd);
-    for (int n = 0; n < NTICKS; n++) r = $fscanf(fd, "%d,%d\n", t, precio[n]);
+    if (r == 0) $fatal(1, "CSV sin encabezado");
+
+    for (int n = 0; n < NTICKS; n++) begin
+      r = $fscanf(fd, "%d,%d\n", t, precio[n]);
+
+      if (r != 2)
+        $fatal(1, "CSV incompleto en tick %0d", n);
+
+      if (t != n)
+        $fatal(1, "Numero de tick incorrecto: %0d", t);
+
+      if (precio[n] < 1 || precio[n] > 255)
+        $fatal(1, "Precio fuera de rango: %0d", precio[n]);
+    end
     $fclose(fd);
   endtask
 
@@ -84,20 +97,62 @@ module tb_proyecto_4;
     if (peak - w > max_dd) max_dd = peak - w;
   endtask
 
-  // Mide los ciclos entre que llega el precio y el programa escribe DECISION
-  int ciclos = 0, peor_caso = 0, respuestas = 0, precios_perdidos = 0;
-  bit esperando = 0;
+  // Verificacion del byte realmente transmitido por MISO
+  logic [7:0] decision_esperada;
+  integer errores_miso_protocolo = 0;
+  integer decisiones_no_hold = 0;
+
+  // Monitor estricto de transacciones SPI
+  int ciclos = 0;
+  int peor_caso = 0;
+  int respuestas = 0;
+  int precios_perdidos = 0;
+
+  int bytes_recibidos = 0;
+  int precios_leidos = 0;
+  int faltan_respuestas = 0;
+  int faltan_lecturas = 0;
+
+  bit esperando_lectura = 0;
+  bit esperando_decision = 0;
 
   always @(posedge clk) begin
     ciclos++;
-    if (dut.u_spi.byte_done) begin
-      if (dut.u_spi.new_price_q) precios_perdidos++;      // el precio anterior no se leyó
-      ciclos = 0;
-      esperando = 1;
-    end else if (esperando && dut.u_spi.wr && dut.u_spi.off == 2) begin
-      if (ciclos > peor_caso) peor_caso = ciclos;
-      respuestas++;
-      esperando = 0;
+
+    if (dut.rst_ni) begin
+
+      if (dut.u_spi.byte_done) begin
+        bytes_recibidos++;
+
+        if (esperando_lectura)
+          faltan_lecturas++;
+
+        if (esperando_decision)
+          faltan_respuestas++;
+
+        if (dut.u_spi.new_price_q)
+          precios_perdidos++;
+
+        ciclos = 0;
+        esperando_lectura = 1;
+        esperando_decision = 1;
+      end
+
+      if (esperando_lectura && dut.u_spi.price_read) begin
+        precios_leidos++;
+        esperando_lectura = 0;
+      end
+
+      if (esperando_decision &&
+          dut.u_spi.wr &&
+          dut.u_spi.off == 2) begin
+
+        if (ciclos > peor_caso)
+          peor_caso = ciclos;
+
+        respuestas++;
+        esperando_decision = 0;
+      end
     end
   end
 
@@ -118,10 +173,27 @@ module tb_proyecto_4;
     leer_serie();
     fd = $fopen("decisiones.csv", "w");
     $fdisplay(fd, "tick,precio,decision,caja,acciones,patrimonio");
-    #4000;
+    wait (dut.rst_ni === 1'b1);
+    repeat (100) @(posedge clk);
+    #1;
 
     for (int n = 0; n < NTICKS; n++) begin
-      spi(precio[n], decision);                            // decisión tomada con el precio anterior
+      decision_esperada = dut.u_spi.tx_hold;
+      spi(precio[n], decision);
+
+      if (decision_esperada != 8'h00)
+        decisiones_no_hold++;
+
+      if (decision !== decision_esperada) begin
+        errores_miso_protocolo++;
+
+        if (errores_miso_protocolo <= 10)
+          $display(
+            "ERROR MISO tick=%0d esperado=%02h recibido=%02h",
+            n, decision_esperada, decision
+          );
+      end
+                            // decisión tomada con el precio anterior
       ejecutar(decision, precio[n]);                       // se ejecuta al precio actual
       $fdisplay(fd, "%0d,%0d,%02h,%0d,%0d,%0d", n, precio[n], decision, caja, acciones, w);
       #(PERIODO_NS - SPI_NS);
@@ -140,12 +212,43 @@ module tb_proyecto_4;
     $display("Peor caso precio->decision: %0d ciclos (disponibles: %0d)", peor_caso, presupuesto);
     $display("Detalle por tick en decisiones.csv");
 
+    $display(
+      "MISO: errores=%0d, decisiones no HOLD=%0d",
+      errores_miso_protocolo, decisiones_no_hold
+    );
+
+    chequear(
+      errores_miso_protocolo == 0,
+      "MISO transmite el byte preparado"
+    );
+
     chequear(bits_x == 0,           "MISO sin valores X");
-    chequear(respuestas > 0,        "el programa escribe DECISION");
+    chequear(bytes_recibidos == NTICKS,
+             "se reciben todos los bytes SPI");
+
+    chequear(respuestas == NTICKS &&
+             faltan_respuestas == 0 &&
+             !esperando_decision,
+             "una decision por cada precio");
+
+    chequear(precios_leidos == NTICKS &&
+             faltan_lecturas == 0 &&
+             !esperando_lectura,
+             "una lectura por cada precio");
     chequear(precios_perdidos == 0, "el programa lee todos los precios");
     chequear(peor_caso < presupuesto, "la decision llega antes del siguiente tick");
 
-    $display("Testbenchs aprobados: %0d/%0d", tests_aprobados, total_tests);
+    $display(
+      "Transacciones=%0d, lecturas=%0d, decisiones=%0d, faltantes=%0d/%0d",
+      bytes_recibidos, precios_leidos, respuestas,
+      faltan_lecturas, faltan_respuestas
+    );
+
+    $display("Testbenchs aprobados: %0d/%0d",
+             tests_aprobados, total_tests);
+
+    if (tests_aprobados != total_tests)
+      $fatal(1, "FAIL: testbench estricto");
     $finish;
   end
 

@@ -1,65 +1,73 @@
+#!/usr/bin/env python3
+
 import csv
+import sys
 
-with open("trade_ref_decisiones.csv", newline="") as f:
-    ref = list(csv.DictReader(f))
+if len(sys.argv) != 3:
+    sys.exit(
+        "Uso: python3 sw/comparar_decisiones.py "
+        "referencia.csv decisiones.csv"
+    )
 
-with open("decisiones.csv", newline="") as f:
-    fpga = list(csv.DictReader(f))
+def cargar(ruta):
+    with open(ruta, newline="") as archivo:
+        return list(csv.DictReader(archivo))
+
+try:
+    referencia = cargar(sys.argv[1])
+    fpga = cargar(sys.argv[2])
+except (OSError, csv.Error) as error:
+    sys.exit(f"FAIL: {error}")
+
+if not referencia or not fpga:
+    sys.exit("FAIL: alguno de los CSV está vacío")
+
+if len(referencia) != len(fpga):
+    sys.exit(
+        f"FAIL: diferentes cantidades de ticks: "
+        f"{len(referencia)} vs {len(fpga)}"
+    )
+
+columnas = (
+    "tick", "precio", "caja",
+    "acciones", "patrimonio"
+)
 
 errores = 0
 
-for i, fila in enumerate(fpga):
-    tick = int(fila["tick"])
-    ejecutada_fpga = int(fila["decision"], 16)
+for indice, (ref, real) in enumerate(zip(referencia, fpga)):
+    try:
+        diferencia = any(
+            int(ref[c]) != int(real[c])
+            for c in columnas
+        )
 
-    # La orden ejecutada en este tick fue decidida
-    # por Python en el tick anterior.
-    esperada = (
-        int(ref[i - 1]["decision_siguiente"], 16)
-        if i > 0 else 0
-    )
+        if "decision_siguiente" in ref:
+            esperado = (
+                int(referencia[indice - 1]["decision_siguiente"], 16)
+                if indice > 0 else 0
+            )
+            diferencia |= int(real["decision"], 16) != esperado
+        elif "decision" in ref:
+            diferencia |= (
+                int(ref["decision"], 16) !=
+                int(real["decision"], 16)
+            )
+        else:
+            sys.exit("FAIL: referencia sin columna de decisión")
 
-    caja_fpga = int(fila["caja"])
-    caja_ref = int(ref[i]["caja"])
+    except (ValueError, KeyError) as error:
+        sys.exit(f"FAIL: dato inválido en tick {indice}: {error}")
 
-    acciones_fpga = int(fila["acciones"])
-    acciones_ref = int(ref[i]["acciones"])
-
-    patrimonio_fpga = int(fila["patrimonio"])
-    patrimonio_ref = int(ref[i]["patrimonio"])
-
-    if (
-        tick != int(ref[i]["tick"])
-        or ejecutada_fpga != esperada
-        or caja_fpga != caja_ref
-        or acciones_fpga != acciones_ref
-        or patrimonio_fpga != patrimonio_ref
-    ):
+    if diferencia:
         errores += 1
         if errores <= 10:
-            print(f"Diferencia en tick {tick}")
-            print(
-                f"  Decision FPGA: {ejecutada_fpga:02x}"
-                f" | Python: {esperada:02x}"
-            )
-            print(
-                f"  Caja FPGA: {caja_fpga}"
-                f" | Python: {caja_ref}"
-            )
-            print(
-                f"  Acciones FPGA: {acciones_fpga}"
-                f" | Python: {acciones_ref}"
-            )
-            print(
-                f"  Patrimonio FPGA: {patrimonio_fpga}"
-                f" | Python: {patrimonio_ref}"
-            )
+            print(f"Diferencia en tick {indice}")
 
-print()
 print(f"Ticks comparados: {len(fpga)}")
-print(f"Ticks con diferencias: {errores}")
+print(f"Diferencias: {errores}")
 
-if errores == 0 and len(fpga) == len(ref):
-    print("PASS: Espino coincide con Python en todos los ticks")
-else:
-    print("FAIL: hay diferencias o distinta cantidad de ticks")
+if errores:
+    sys.exit(1)
+
+print("PASS: decisiones y contabilidad coinciden")

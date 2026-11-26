@@ -1,46 +1,52 @@
-# Copyright 2026 Universidad de los Andes.
-# Licensed under the Solderpad Hardware License, Version 0.51 (the "License");
-# you may not use this file except in compliance with the License.
-# SPDX-License-Identifier: SHL-0.51
-#
-# Course: Arquitectura de Computadores (2026)
-#
-# Authors:
-# - Nicolás Villegas <navillegas@miuandes.cl>
+PYTHON := python3
+TOP := pochoco_soc
+PCF := goboard_medicion.pcf
 
-TOP := game_top
-PCF := goboard.pcf
+SRC := $(wildcard rtl/*.v rtl/espino_core/*.v)
 
-SRC := $(wildcard ./rtl/*.v ./rtl/**/*.v)
+BUILD := build_trader
+JSON := $(BUILD)/pochoco_soc.json
+ASC := $(BUILD)/pochoco_soc.asc
+BIN := $(BUILD)/pochoco_soc.bin
 
-GAME_S := sw/game.s
-ASSEMBLER := sw/assembler.py
-GAME_HEX := sw/game.hex
+.PHONY: all trade test test-short clean
 
-JSON := $(TOP).json
-ASC := $(TOP).asc
-BIN := $(TOP).bin
+all: trade
+trade: $(BIN)
 
-.PHONY: all game prog clean stats
+sw/trade.hex: sw/trade.s sw/assembler.py
+	$(PYTHON) sw/assembler.py sw/trade.s sw/trade.hex
 
-all: prog
-
-game: $(GAME_HEX)
-
-$(GAME_HEX): $(GAME_S) $(ASSEMBLER)
-	cd sw && python assembler.py game.s game.hex
-
-$(JSON): $(SRC) $(GAME_HEX)
-	yosys -p "read_verilog $(SRC); synth_ice40 -top $(TOP) -json $(TOP).json; stat"
+$(JSON): $(SRC) sw/trade.hex $(PCF)
+	mkdir -p $(BUILD)
+	yosys -p 'read_verilog $(SRC); synth_ice40 -top $(TOP) -json $(JSON)' > $(BUILD)/yosys.log
 
 $(ASC): $(JSON) $(PCF)
-	nextpnr-ice40 --hx1k --package vq100 --json $(JSON) --pcf $(PCF) --asc $(ASC)
+	nextpnr-ice40 --hx1k --package vq100 \
+	--json $(JSON) \
+	--pcf $(PCF) \
+	--asc $(ASC) \
+	--freq 25 \
+	--log $(BUILD)/nextpnr.log
 
 $(BIN): $(ASC)
 	icepack $(ASC) $(BIN)
 
-prog: $(BIN)
-	iceprog $(BIN)
+test:
+	$(PYTHON) sw/assembler.py sw/trade.s sw/trade.hex
+	iverilog -g2012 -s tb_proyecto_4 \
+	-o /tmp/pochoco_test.vvp \
+	tb/tb_proyecto_4_test.sv \
+	$(SRC) /usr/share/yosys/ice40/cells_sim.v
+	vvp /tmp/pochoco_test.vvp
+
+test-short:
+	$(PYTHON) sw/assembler.py sw/trade.s sw/trade.hex
+	iverilog -g2012 -s tb_proyecto_4 \
+	-o /tmp/pochoco_test_short.vvp \
+	tb/tb_proyecto_4.sv \
+	$(SRC) /usr/share/yosys/ice40/cells_sim.v
+	vvp /tmp/pochoco_test_short.vvp
 
 clean:
-	rm -f $(JSON) $(ASC) $(BIN)
+	rm -rf $(BUILD)
