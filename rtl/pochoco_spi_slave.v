@@ -85,7 +85,12 @@ module pochoco_spi_slave (
     end
   end
 
-  assign spi_miso_o = cs_active ? tx_shift[7] : 1'b0;
+  // Primer bit disponible inmediatamente al activar CS.
+// Luego transmitir los bits desde el registro sincronizado.
+assign spi_miso_o = spi_cs_n_i ?
+                    1'b0 :
+                    (cs_assert ? tx_hold[7] :
+                    (cs_active ? tx_shift[7] : tx_hold[7]));
 
   // PRICE latch
   wire price_read = rd & (off == REG_PRICE);
