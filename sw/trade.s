@@ -29,6 +29,7 @@ _start:
     sw x0, 20(x12)
     sw x0, 24(x12)
     sw x0, 28(x12)
+    sw x0, 32(x12)   # Cantidad de compra guardada
 
     # Decision inicial HOLD
     sw x0, 8(x2)
@@ -322,6 +323,7 @@ cantidad_lateral:
     addi x6, x0, 72
 
 enviar_compra:
+    sw x6, 32(x12)  # Guardar orden de compra
     sw x6, 8(x2)
     addi x15, x0, 1
     jal x0, wait_price
@@ -329,8 +331,9 @@ enviar_compra:
 vender:
     sw x5, 8(x12)
 
-    # Vender 16 acciones
-    addi x6, x0, 144
+    # Vender la cantidad solicitada en la compra
+    lw x6, 32(x12)
+    addi x6, x6, 64
     sw x6, 8(x2)
 
     addi x15, x0, 3
