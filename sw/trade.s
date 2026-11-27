@@ -31,6 +31,11 @@ _start:
     sw x0, 28(x12)
     sw x0, 32(x12)   # Cantidad de compra guardada
 
+    # Efectivo estimado inicial: 10000
+    lui x6, 0x2
+    addi x6, x6, 1808
+    sw x6, 36(x12)
+
     # Decision inicial HOLD
     sw x0, 8(x2)
 
@@ -44,6 +49,23 @@ wait_price:
     # Compra pendiente
     addi x4, x0, 1
     bne x15, x4, check_sell_pending
+
+    # Estimar costo de la compra ejecutada en este tick
+    lw x6, 32(x12)
+    andi x6, x6, 63
+    addi x11, x0, 0
+
+compra_contar_efectivo:
+    beq x6, x0, compra_efectivo_listo
+    add x11, x11, x5
+    addi x6, x6, -1
+    jal x0, compra_contar_efectivo
+
+compra_efectivo_listo:
+    lw x6, 36(x12)
+    sub x6, x6, x11
+    addi x6, x6, -5
+    sw x6, 36(x12)
 
     addi x15, x0, 2
 
@@ -63,6 +85,23 @@ check_sell_pending:
     jal x0, update_window
 
 sell_executed:
+    # Estimar ingreso por venta ejecutada en este tick
+    lw x6, 32(x12)
+    andi x6, x6, 63
+    addi x11, x0, 0
+
+venta_contar_efectivo:
+    beq x6, x0, venta_efectivo_listo
+    add x11, x11, x5
+    addi x6, x6, -1
+    jal x0, venta_contar_efectivo
+
+venta_efectivo_listo:
+    lw x6, 36(x12)
+    add x6, x6, x11
+    addi x6, x6, -5
+    sw x6, 36(x12)
+
     addi x15, x0, 4
     jal x0, update_window
 
@@ -323,6 +362,29 @@ cantidad_lateral:
     addi x6, x0, 72
 
 enviar_compra:
+    # Verificar efectivo incluso con precio futuro = 255
+    lw x11, 36(x12)
+
+    # Si se solicitan 16 acciones, reservar 16*255+5=4085
+    addi x4, x0, 80
+    bne x6, x4, revisar_compra_ocho
+
+    lui x4, 0x1
+    addi x4, x4, -11
+    bge x11, x4, compra_autorizada
+
+    # Sin efectivo para 16: intentar 8
+    addi x6, x0, 72
+
+revisar_compra_ocho:
+    # Reservar 8*255+5=2045
+    addi x4, x0, 2045
+    bge x11, x4, compra_autorizada
+
+    # Sin efectivo seguro: HOLD
+    jal x0, mantener
+
+compra_autorizada:
     sw x6, 32(x12)  # Guardar orden de compra
     sw x6, 8(x2)
     addi x15, x0, 1

@@ -212,6 +212,13 @@ module tb_proyecto_4;
     ref_w       = CAJA0 - COMISION - ref_q * precio[0] + ref_q * precio[NTICKS - 1];
     presupuesto = (PERIODO_NS - SPI_NS) / 40;
 
+    $display("Efectivo real:             %0d", caja);
+    $display("Efectivo estimado Espino:  %0d", dut.u_ram.mem[393]);
+    chequear(
+      dut.u_ram.mem[393] == caja,
+      "efectivo estimado coincide con la maestra"
+    );
+
     $display("Patrimonio final:          %0d", w);
     $display("Ordenes ejecutadas:        %0d", ordenes);
     $display("Perdida maxima:            %0d", max_dd);
